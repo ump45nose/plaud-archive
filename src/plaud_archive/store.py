@@ -106,8 +106,8 @@ class Archive:
         suffix = " WHERE " + " AND ".join(where) if where else ""
         with self.connect() as db:
             total = db.execute("SELECT count(*) FROM days d" + suffix, args).fetchone()[0]
-            rows = db.execute("SELECT d.*,j.state,j.error,(SELECT count(*) FROM audio a WHERE a.date=d.date) audio_count "
-                              "FROM days d LEFT JOIN jobs j ON j.date=d.date" + suffix + " ORDER BY d.date DESC LIMIT ? OFFSET ?",
+            rows = db.execute("SELECT d.*,(SELECT count(*) FROM audio a WHERE a.date=d.date) audio_count "
+                              "FROM days d" + suffix + " ORDER BY d.date DESC LIMIT ? OFFSET ?",
                               [*args, limit, offset]).fetchall()
         return {"items": [dict(r) for r in rows], "total": total, "offset": offset, "limit": limit}
 
