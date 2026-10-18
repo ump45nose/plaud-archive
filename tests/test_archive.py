@@ -224,7 +224,7 @@ def test_migration_deduplicates_without_modifying_source(archive, tmp_path):
     from plaud_archive.migration import migrate
     source = tmp_path / "original.wav"
     with wave.open(str(source), "wb") as out:
-        out.setnchannels(1); out.setsampwidth(2); out.setframerate(16000); out.writeframes(b"\0\0" * 16000)
+        out.setnchannels(1); out.setsampwidth(2); out.setframerate(16000); out.writeframes(b"\0\0" * 16600)
     before = source.read_bytes(); sha = hashlib.sha256(before).hexdigest()
     roots = []
     for index in range(2):
@@ -235,6 +235,7 @@ def test_migration_deduplicates_without_modifying_source(archive, tmp_path):
     report = migrate(archive, Workflow(str(archive.root)), roots, tmp_path / "report.json")
     assert report["audio_count"] == 1 and report["errors"] == []
     assert len(archive.get_day("2026-10-01")["audio"]) == 1
+    assert archive.get_day("2026-10-01")["audio"][0]["duration_ms"] == 1038
     assert source.read_bytes() == before
 
 

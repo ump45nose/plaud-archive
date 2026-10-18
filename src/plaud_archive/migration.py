@@ -44,7 +44,7 @@ def migrate(archive, config, roots, report_path):
                 path, suffix, duration = playable(source, raw_opus=row["media_format"] in ("opusraw", "media"), output=wrapped)
                 name = filename(metadata.get("name") or row["start_at"].replace(":", "-"))
                 if not name.lower().endswith(suffix): name += suffix
-                audio = archive.add_audio(day, name, path, source_id=sid, start_at=row["start_at"], duration_ms=row["duration_ms"])
+                audio = archive.add_audio(day, name, path, source_id=sid, start_at=row["start_at"], duration_ms=round(duration * 1000))
                 # Wrapping legacy packet streams never mutates or replaces the old source.
                 if path != source: path.unlink(missing_ok=True)
                 by_source[sid] = audio
