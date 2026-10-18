@@ -149,6 +149,7 @@ class Archive:
             if directory.exists(): os.replace(directory, trash)
             try:
                 db.execute("DELETE FROM days WHERE date=?", (day,))
+                db.execute("DELETE FROM steps WHERE date=?", (day,))
                 # Persist deletion suppression with the index, even if trash cleanup fails.
                 db.execute("INSERT OR REPLACE INTO jobs VALUES(?,?,?,?,?)", (day, "complete", None, None, now()))
                 db.commit()

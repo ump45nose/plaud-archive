@@ -166,10 +166,12 @@ def test_gemini_paragraph_order_and_incomplete_responses():
 def test_failed_file_cleanup_does_not_resurrect_deleted_day(archive):
     archive.create_day("2026-10-17", "正文")
     archive.job("2026-10-17", "failed", error="prior processing failed")
+    archive.save_step("2026-10-17", "gemini", "failed", 1, error="upstream failed")
     with patch("plaud_archive.store.shutil.rmtree", side_effect=OSError("filesystem denied removal")):
         with pytest.raises(OSError): archive.delete_day("2026-10-17")
     with pytest.raises(NotFound): archive.get_day("2026-10-17")
     assert archive.status("2026-10-17")[0]["state"] == "complete"
+    assert archive.status("2026-10-17")[0]["steps"] == []
 
 
 def test_plaud_wrapper_quoted_tag_in_preamble():
