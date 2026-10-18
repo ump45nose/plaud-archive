@@ -19,8 +19,12 @@ from .store import filename
 def payload(result):
     if result.isError: raise RuntimeError("Plaud MCP tool failed; check runtime login")
     text = "\n".join(getattr(p, "text", "") for p in result.content)
-    for m in re.finditer(r"<(untrusted-user-data-[^ >]+)(?:\s+[^>]*)?>(.*?)</\1>", text, re.S):
-        return json.loads(m[2].strip())
+    if text.startswith("MCP error") or text.startswith("Error:"):
+        raise RuntimeError(text[:300])
+    # The explanatory preamble quotes the opening tag too. Start at the last actual opening tag.
+    for m in reversed(list(re.finditer(r"<(untrusted-user-data-[^ >]+)(?:\s+[^>]*)?>", text))):
+        end = text.find(f"</{m[1]}>", m.end())
+        if end >= 0: return json.loads(text[m.end():end].strip())
     return json.loads(text)
 
 
@@ -30,6 +34,8 @@ class PlaudCollector:
     async def collect(self, day):
         cfg, archive = self.config, self.archive
         env = dict(os.environ)
+        if cfg.outbound_proxy:
+            env.update(HTTP_PROXY=cfg.outbound_proxy, HTTPS_PROXY=cfg.outbound_proxy)
         if cfg.token_file:
             if not Path(cfg.token_file).is_file(): raise RuntimeError("Plaud login required")
             env["HOME"] = str(Path(cfg.token_file).parent.parent)
@@ -53,6 +59,7 @@ class PlaudCollector:
                         if not detail.get("presigned_url"): raise RuntimeError("Plaud audio download URL not ready")
                         self.download(day, detail); count += 1; known.add(item["id"])
                     dates = [datetime.fromisoformat(i["created_at"].replace("Z", "+00:00")) for i in listing]
+                    dates = [d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d for d in dates]
                     if min(dates) < cutoff: return {"downloaded": count}
         raise RuntimeError("Plaud pagination did not finish")
 
@@ -64,7 +71,7 @@ class PlaudCollector:
         fd, temp = tempfile.mkstemp(dir=directory, suffix=".download")
         source = Path(temp); normalized = source
         try:
-            with os.fdopen(fd, "wb") as output, httpx.stream("GET", url, follow_redirects=True, timeout=120) as response:
+            with os.fdopen(fd, "wb") as output, httpx.stream("GET", url, follow_redirects=True, timeout=120, proxy=self.config.outbound_proxy or None, trust_env=False) as response:
                 response.raise_for_status()
                 for block in response.iter_bytes(1024 * 1024): output.write(block)
                 output.flush(); os.fsync(output.fileno())

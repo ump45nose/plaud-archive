@@ -1,0 +1,23 @@
+schema_version: 1
+id: plaud-archive
+name: Plaud Archive
+# Native systemd backend; public routing uses existing NPM TLS :28443.
+# Generic platform deploy currently proposes a Tunnel change; do not apply that route.
+deployment_mode: existing
+command: [plaud-archive, serve]
+public_url: https://plaud-home.172906573.xyz:28443
+host_port: 18095
+port: 18095
+bind_address: 192.168.31.201
+user: '988:984'
+environment:
+  HOST: 192.168.31.201
+  PORT: '18095'
+  PLAUD_ARCHIVE_ROOT: /vol1/1000/plaud-archive
+  OAUTH_STORAGE_PATH: /vol1/1000/plaud-archive/oauth
+  MCP_DEVELOPMENT_NO_AUTH: 'false'
+required_env: [OIDC_CLIENT_SECRET, OAUTH_JWT_SIGNING_KEY, OAUTH_STORAGE_ENCRYPTION_KEY, OIDC_AUTHORIZED_USERNAMES, PLAUD_API_READ_TOKEN, PLAUD_API_WRITE_TOKEN]
+auth:
+  client_id: plaud-archive
+  discovery_url: https://authelia-home.172906573.xyz:28443/.well-known/openid-configuration
+expected_tools: [list_archives, get_archive, get_transcript, create_archive, update_archive, delete_archive, get_audio, read_audio, create_audio, update_audio, delete_audio, get_processing_status]

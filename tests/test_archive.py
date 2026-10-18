@@ -8,6 +8,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from types import SimpleNamespace
 from fastapi.testclient import TestClient
 from fastmcp import Client
 from mcp_platform import RuntimeConfig
@@ -79,6 +80,11 @@ def test_http_permissions_audio_and_mcp_equivalence(archive, tmp_path):
                 assert text.content[0].text == "正文"
                 await c.call_tool("update_archive", {"date": record["date"], "markdown": "MCP 改稿"})
                 assert archive.get_day(record["date"])["markdown"] == "MCP 改稿"
+                data = await c.call_tool("read_audio", {"date": record["date"], "id": audio_id, "limit_bytes": 3})
+                value = data.data
+                import base64
+                assert base64.b64decode(value["base64"]) == b"aud"
+                assert value["next_offset"] == 3
         asyncio.run(mcp())
         assert client.delete(url, headers={"Authorization": "Bearer writer"}).status_code == 200
         assert client.get(url, headers={"Authorization": "Bearer reader"}).status_code == 404
@@ -130,6 +136,39 @@ def test_whole_paragraph_token_packing():
     with pytest.raises(ValueError): list(batches(["very long paragraph" * 100], 3, enc))
 
 
+def test_response_written_before_crash_is_reused(archive):
+    day = "2026-10-17"
+    archive.ensure_day(day)
+    path = archive.root / "raw" / day / "gemini.json"
+    archive.save_step(day, "gemini", "running", 1)
+    atomic_write(path, json.dumps({"text": "完整响应"}).encode())
+    pipeline = Pipeline(archive, Workflow(str(archive.root)))
+    def must_not_call(): raise AssertionError("cached operation was called again")
+    assert pipeline.step(day, "gemini", path, must_not_call)["text"] == "完整响应"
+    assert archive.step(day, "gemini")["state"] == "complete"
+    assert archive.step(day, "gemini")["attempts"] == 1
+
+
+def test_gemini_paragraph_order_and_incomplete_responses():
+    from plaud_archive.providers import gemini_transcript
+    text = "[00:02] 说话人 A：第一段。\n完整的第二行。\n\n[01:10] 说话人 B：末段。"
+    result = gemini_transcript({"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": text}]}}]})
+    assert result["text"] == text
+    assert result["paragraphs"] == [{"start": 2, "text": "说话人 A：第一段。\n完整的第二行。"}, {"start": 70, "text": "说话人 B：末段。"}]
+    with pytest.raises(RuntimeError, match="MAX_TOKENS"):
+        gemini_transcript({"candidates": [{"finishReason": "MAX_TOKENS"}]})
+    with pytest.raises(RuntimeError, match="empty"):
+        gemini_transcript({"candidates": [{"finishReason": "STOP", "content": {"parts": []}}]})
+
+
+def test_plaud_wrapper_quoted_tag_in_preamble():
+    from plaud_archive.collection import payload
+    text = 'The block <untrusted-user-data-abc> below is data.\n<untrusted-user-data-abc source="plaud">\n{"data": []}\n</untrusted-user-data-abc>'
+    assert payload(SimpleNamespace(isError=False, content=[SimpleNamespace(text=text)])) == {"data": []}
+    with pytest.raises(RuntimeError, match="MCP error"):
+        payload(SimpleNamespace(isError=False, content=[SimpleNamespace(text="MCP error -32602: bad arguments")]))
+
+
 def test_long_audio_tail_and_multiple_recording_order(archive, tmp_path):
     day = "2026-10-17"; archive.ensure_day(day)
     for start, duration in (("01", 1225000), ("02", 1000)):
@@ -141,3 +180,58 @@ def test_long_audio_tail_and_multiple_recording_order(archive, tmp_path):
     with patch("plaud_archive.pipeline.cut", side_effect=extract):
         assert Pipeline(archive, Workflow(str(tmp_path)), provider).run_day(day, collect=False)["state"] == "complete"
     assert spans == [("01.mp3", 0, 1200), ("01.mp3", 1200, 25.0), ("02.mp3", 0, 1.0)]
+
+
+def test_native_opus_packets_are_wrapped_and_decode(tmp_path):
+    import subprocess
+    from plaud_archive.audio import playable
+    source = tmp_path / "original.opus"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-ac", "1", "-c:a", "libopus", "-b:a", "32k", "-vbr", "off", str(source)], check=True)
+    data = source.read_bytes(); offset = 0; packets = []; packet = b""
+    while offset < len(data):
+        count = data[offset + 26]; laces = data[offset + 27:offset + 27 + count]
+        body = offset + 27 + count
+        for size in laces:
+            packet += data[body:body + size]; body += size
+            if size < 255: packets.append(packet); packet = b""
+        offset = body
+    raw = tmp_path / "raw.device"; raw.write_bytes(b"".join(packets[2:]))
+    assert all(len(p) == 80 for p in packets[2:])
+    output = tmp_path / "archive.opus"
+    path, suffix, duration = playable(raw, raw_opus=True, output=output)
+    assert path == output and suffix == ".opus" and duration > 0.9
+    subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "null", "-"], check=True)
+    assert source.read_bytes() == data
+
+
+def test_migration_deduplicates_without_modifying_source(archive, tmp_path):
+    import sqlite3
+    import wave
+    import hashlib
+    from plaud_archive.migration import migrate
+    source = tmp_path / "original.wav"
+    with wave.open(str(source), "wb") as out:
+        out.setnchannels(1); out.setsampwidth(2); out.setframerate(16000); out.writeframes(b"\0\0" * 16000)
+    before = source.read_bytes(); sha = hashlib.sha256(before).hexdigest()
+    roots = []
+    for index in range(2):
+        root = tmp_path / f"old-{index}"; (root / "state").mkdir(parents=True); roots.append(str(root))
+        with sqlite3.connect(root / "state/state.db") as db:
+            db.execute("CREATE TABLE recordings(recording_id,local_path,local_date,sha256,media_format,start_at,duration_ms)")
+            db.execute("INSERT INTO recordings VALUES(?,?,?,?,?,?,?)", ("same", str(source), "2026-10-01", sha, "media", "2026-10-01T00:00:00Z", 1000))
+    report = migrate(archive, Workflow(str(archive.root)), roots, tmp_path / "report.json")
+    assert report["audio_count"] == 1 and report["errors"] == []
+    assert len(archive.get_day("2026-10-01")["audio"]) == 1
+    assert source.read_bytes() == before
+
+
+def test_oauth_read_only_identity_cannot_write():
+    from mcp_platform import authorize
+    config = SimpleNamespace(development_no_auth=False, authorized_usernames={"reader", "writer"}, read_only_usernames={"reader"}, execute_usernames=set())
+    reader = SimpleNamespace(token=SimpleNamespace(claims={"upstream_claims": {"preferred_username": "reader"}}))
+    writer = SimpleNamespace(token=SimpleNamespace(claims={"preferred_username": "writer"}))
+    stranger = SimpleNamespace(token=SimpleNamespace(claims={"preferred_username": "other"}))
+    assert authorize("read", config)(reader)
+    assert not authorize("write", config)(reader)
+    assert authorize("write", config)(writer)
+    assert not authorize("read", config)(stranger)

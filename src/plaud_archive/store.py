@@ -70,11 +70,14 @@ class Archive:
               PRIMARY KEY(date,key));
             """)
 
+    @contextlib.contextmanager
     def connect(self):
         db = sqlite3.connect(self.database, timeout=20)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys=ON")
-        return db
+        try:
+            with db: yield db
+        finally: db.close()
 
     @contextlib.contextmanager
     def lock(self, day: str):
@@ -145,14 +148,16 @@ class Archive:
             trash = self.root / (".deleted-" + uuid.uuid4().hex)
             if directory.exists(): os.replace(directory, trash)
             try:
-                db.execute("DELETE FROM days WHERE date=?", (day,)); db.commit()
+                db.execute("DELETE FROM days WHERE date=?", (day,))
+                # Persist deletion suppression with the index, even if trash cleanup fails.
+                db.execute("INSERT OR REPLACE INTO jobs VALUES(?,?,?,?,?)", (day, "complete", None, None, now()))
+                db.commit()
             except BaseException:
                 if trash.exists(): os.replace(trash, directory)
                 raise
-            shutil.rmtree(trash, ignore_errors=True)
-            shutil.rmtree(self.root / "raw" / day, ignore_errors=True)
-            # Keeping the tiny completed job prevents automatic resurrection after a user deletion.
-            self.job(day, "complete")
+            if trash.exists(): shutil.rmtree(trash)
+            raw = self.root / "raw" / day
+            if raw.exists(): shutil.rmtree(raw)
         return {"deleted": day}
 
     def add_audio(self, day, name, source: Path, *, source_id=None, start_at=None, duration_ms=None):
@@ -174,6 +179,7 @@ class Archive:
                 os.replace(tmp, target)
                 db.execute("INSERT INTO audio VALUES(?,?,?,?,?,?)", (identifier, day, source_id, name, start_at, duration_ms))
                 db.execute("UPDATE days SET updated_at=? WHERE date=?", (now(), day))
+                db.commit()
             except BaseException:
                 Path(tmp).unlink(missing_ok=True); target.unlink(missing_ok=True); raise
         return self.get_audio(day, identifier)
@@ -188,6 +194,17 @@ class Archive:
     def audio_path(self, day, identifier):
         row = self.get_audio(day, identifier)
         return self.directory(day) / "audio" / row["name"]
+
+    def read_audio(self, day, identifier, offset_bytes=0, limit_bytes=262144):
+        import base64
+        if offset_bytes < 0 or not 1 <= limit_bytes <= 262144: raise ValueError("invalid audio page")
+        path = self.audio_path(day, identifier)
+        with path.open("rb") as stream:
+            stream.seek(offset_bytes); data = stream.read(limit_bytes)
+        size = path.stat().st_size
+        end = offset_bytes + len(data)
+        return {"id": identifier, "name": path.name, "size": size, "offset_bytes": offset_bytes,
+                "base64": base64.b64encode(data).decode(), "next_offset": end if end < size else None}
 
     def update_audio(self, day, identifier, name):
         name = filename(name)

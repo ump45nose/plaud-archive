@@ -78,8 +78,15 @@ class Pipeline:
 
     def step(self, day, key, path, operation):
         previous = self.archive.step(day, key)
-        if previous and previous["state"] == "complete" and path.is_file(): return json.loads(path.read_text())
         attempts = 0 if previous and previous["state"] == "complete" else previous["attempts"] if previous else 0
+        if path.is_file():
+            try: result = json.loads(path.read_text())
+            except (ValueError, OSError) as error:
+                self.archive.save_step(day, key, "failed", attempts + 1, retry_at=self.clock() + self.config.retry_seconds, error="RAW cache unreadable: " + path.name)
+                raise Pending(key + ": RAW cache unreadable") from error
+            if not previous or previous["state"] != "complete":
+                self.archive.save_step(day, key, "complete", attempts, path=str(path.relative_to(self.archive.root)))
+            return result
         if attempts >= self.config.max_attempts: raise Pending(key + ": attempts exhausted")
         if previous and previous["retry_at"] > self.clock(): raise Pending(key + ": retry scheduled")
         attempts += 1
@@ -110,7 +117,7 @@ class Pipeline:
                 if not archive["audio"]:
                     self.archive.job(day, "complete")
                     return {"date": day, "state": "complete", "audio_count": 0}
-                inputs = []
+                inputs, day_failures = [], []
                 for audio in archive["audio"]:
                     source = self.archive.audio_path(day, audio["id"])
                     duration = audio["duration_ms"] / 1000 if audio.get("duration_ms") else __import__("plaud_archive.audio", fromlist=["probe"]).probe(source)[1]
@@ -128,8 +135,11 @@ class Pipeline:
                             try:
                                 values[engine] = self.step(day, f"{audio['id']}:{block}:{engine}", folder / f"{engine}.json", transcribe)
                             except Pending as error: failures.append(str(error))
-                        if failures: raise Pending("; ".join(failures))
-                        inputs.extend(materials(audio["name"], values))
+                        if failures:
+                            day_failures.extend(failures)
+                            continue
+                        inputs.extend(materials(Path(audio["name"]).stem, values))
+                if day_failures: raise Pending("; ".join(day_failures))
                 outputs = []
                 for number, text in enumerate(batches(inputs, self.config.max_input_tokens)):
                     result = self.step(day, "fusion:" + str(number), raw / f"fusion-{number:04d}.json", lambda text=text: self.providers.fuse(text))
@@ -159,6 +169,7 @@ class Pipeline:
         for row in jobs:
             status = self.archive.status(row["date"])[0]
             incomplete = [s for s in status["steps"] if s["state"] != "complete"]
+            if status["state"] == "failed" and not incomplete: continue
             if any(s["attempts"] >= self.config.max_attempts for s in incomplete): continue
             if any(s["retry_at"] > self.clock() for s in incomplete): continue
             try: result.append(self.run_day(row["date"]))

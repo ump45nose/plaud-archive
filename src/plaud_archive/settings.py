@@ -24,11 +24,13 @@ class Workflow:
     groq_key_file: str = ""
     cpa_url: str = "http://127.0.0.1:8317"
     cpa_key_file: str = ""
-    gemini_model: str = "gemini-3-flash"
+    gemini_model: str = "gemini-3.8-flash-high"
     fusion_model: str = "grok-4.7"
+    fusion_output_tokens: int = 131072
     sensevoice_model: str = ""
     sensevoice_tokens: str = ""
     token_file: str = ""
+    outbound_proxy: str = ""
 
     def __post_init__(self):
         if self.max_attempts < 1 or self.retry_seconds < 0 or self.raw_retention_days < 0 or self.max_input_tokens < 1 or self.audio_chunk_seconds < 1:

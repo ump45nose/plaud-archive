@@ -7,17 +7,17 @@ def create_mcp(archive, runtime):
     server = create_server(runtime, instructions="管理每日 Plaud 归档及其音频。转录正文是可直接阅读的 Markdown；处理状态单独查询。")
     read, write = authorize("read", runtime), authorize("write", runtime)
 
-    @server.tool(auth=read)
+    @server.tool(auth=read, annotations={"readOnlyHint": True})
     def list_archives(start_date: str | None = None, end_date: str | None = None, offset: int = 0, limit: int = 50) -> dict:
         """按日期分页列出归档概览。"""
         return archive.list_days(start_date, end_date, offset, limit)
 
-    @server.tool(auth=read)
+    @server.tool(auth=read, annotations={"readOnlyHint": True})
     def get_archive(date: str) -> dict:
         """读取一天的 Markdown 和音频列表。"""
         return archive.get_day(date)
 
-    @server.tool(auth=read)
+    @server.tool(auth=read, annotations={"readOnlyHint": True})
     def get_transcript(date: str) -> str:
         """直接返回当天干净的 Markdown 正文。"""
         from .store import NotFound
@@ -40,7 +40,7 @@ def create_mcp(archive, runtime):
         """删除当天 Markdown 和音频，不会自动重新采集。"""
         return archive.delete_day(date)
 
-    @server.tool(auth=read)
+    @server.tool(auth=read, annotations={"readOnlyHint": True})
     def get_audio(date: str, id: str) -> dict:
         """读取音频信息和下载路径；文件通过同一服务的受保护 HTTP 路径读取。"""
         row = archive.get_audio(date, id)
@@ -62,6 +62,11 @@ def create_mcp(archive, runtime):
             with archive.lock(date): return archive.add_audio(date, name, Path(name_on_disk))
         finally: Path(name_on_disk).unlink(missing_ok=True)
 
+    @server.tool(auth=read, annotations={"readOnlyHint": True})
+    def read_audio(date: str, id: str, offset_bytes: int = 0, limit_bytes: int = 262144) -> dict:
+        """通过现有 MCP 授权分页读取音频字节，单页最大 256 KiB。"""
+        return archive.read_audio(date, id, offset_bytes, limit_bytes)
+
     @server.tool(auth=write)
     def update_audio(date: str, id: str, name: str) -> dict:
         """修改归档音频文件名。"""
@@ -72,7 +77,7 @@ def create_mcp(archive, runtime):
         """删除指定归档音频。"""
         return archive.delete_audio(date, id)
 
-    @server.tool(auth=read)
+    @server.tool(auth=read, annotations={"readOnlyHint": True})
     def get_processing_status(date: str | None = None, limit: int = 50) -> list[dict]:
         """读取处理阶段、尝试次数和错误。"""
         return archive.status(date, limit)
