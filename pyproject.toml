@@ -1,0 +1,27 @@
+[project]
+name = "plaud-archive"
+version = "0.1.0"
+description = "Plaud collection, three-source transcription and file archives with HTTP/MCP CRUD"
+requires-python = ">=3.12"
+dependencies = ["httpx>=0.27,<1", "mcp>=1.12,<2", "PyYAML>=6,<7", "tiktoken>=0.8,<1"]
+
+[project.optional-dependencies]
+server = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "python-multipart>=0.0.18", "mcp-platform"]
+local = ["numpy>=1.26,<3", "sherpa-onnx>=1.10,<2", "opencc-python-reimplemented>=0.1.7"]
+test = ["pytest>=8,<10"]
+
+[project.scripts]
+plaud-archive = "plaud_archive.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/plaud_archive"]
+
+[tool.uv.sources]
+mcp-platform = { git = "https://github.com/ump45nose/mcp-platform.git", rev = "dea309a5d83b6365a57937bc6e11affe692bfcaf" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
