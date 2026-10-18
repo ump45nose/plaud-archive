@@ -70,7 +70,7 @@ def migrate(archive, config, roots, report_path):
                     key = f"{audio['id']}:{block}:{engine}"
                     if archive.step(audio["date"], key): continue
                     value = legacy_result(folder, engine)
-                    if value is None: continue
+                    if value is None or not value["text"].strip(): continue
                     target = destination / f"{engine}.json"
                     atomic_write(target, json.dumps(value, ensure_ascii=False).encode())
                     archive.save_step(audio["date"], key, "complete", 0, path=str(target.relative_to(archive.root)))

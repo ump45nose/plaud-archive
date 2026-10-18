@@ -28,6 +28,8 @@ plaud-archive serve
 
 API 使用不同的 `PLAUD_API_READ_TOKEN` / `PLAUD_API_WRITE_TOKEN`，支持对应 `_FILE`；MCP 沿用平台 OAuth。生产缺少凭据拒绝启动，无认证开发仅允许回环。服务器设置 `PLAUD_ARCHIVE_ROOT`、公共运行时 OIDC/OAuth 环境变量。
 
+MCP 授权用户通过 `OIDC_AUTHORIZED_USERNAMES` 配置，其中 `OIDC_READ_ONLY_USERNAMES` 的用户仅可读取；写入复用平台同一权限检查。Gemini 使用可配置模型名，示例为当前 CPA 已验证的别名；转录关闭思考并保留明确的完成/空响应/上游内容过滤错误，不将被阻断的响应当成成功。
+
 - `/api/v1/archives`：GET 日期筛选和分页，POST `{date, markdown}` 创建。
 - `/api/v1/archives/{date}`：GET 完整归档，PATCH `{markdown}` 替换正文，DELETE 删除正文和当天音频。
 - `/api/v1/archives/{date}/transcript.md`：GET 干净 Markdown。

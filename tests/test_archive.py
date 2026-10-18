@@ -110,9 +110,9 @@ def test_bounded_retry_resume_and_no_partial_publish(archive, tmp_path):
     with patch("plaud_archive.pipeline.cut", side_effect=lambda src, dst, off, dur: atomic_write(dst, b"clip")):
         assert pipeline.run_day(day, collect=False)["state"] == "failed"
         assert archive.get_day(day)["markdown"] is None
-        assert providers.calls == ["groq", "gemini", "sensevoice"]
+        assert sorted(providers.calls) == ["gemini", "groq", "sensevoice"]
         pipeline.run_day(day, collect=False)
-        assert providers.calls == ["groq", "gemini", "sensevoice"]
+        assert sorted(providers.calls) == ["gemini", "groq", "sensevoice"]
         clock[0] += 31
         assert pipeline.run_day(day, collect=False)["state"] == "failed"
         clock[0] += 31; pipeline.run_day(day, collect=False)
@@ -159,6 +159,17 @@ def test_gemini_paragraph_order_and_incomplete_responses():
         gemini_transcript({"candidates": [{"finishReason": "MAX_TOKENS"}]})
     with pytest.raises(RuntimeError, match="empty"):
         gemini_transcript({"candidates": [{"finishReason": "STOP", "content": {"parts": []}}]})
+    with pytest.raises(RuntimeError, match="content filter"):
+        gemini_transcript({"promptFeedback": {"blockReason": "OTHER"}})
+
+
+def test_failed_file_cleanup_does_not_resurrect_deleted_day(archive):
+    archive.create_day("2026-10-17", "正文")
+    archive.job("2026-10-17", "failed", error="prior processing failed")
+    with patch("plaud_archive.store.shutil.rmtree", side_effect=OSError("filesystem denied removal")):
+        with pytest.raises(OSError): archive.delete_day("2026-10-17")
+    with pytest.raises(NotFound): archive.get_day("2026-10-17")
+    assert archive.status("2026-10-17")[0]["state"] == "complete"
 
 
 def test_plaud_wrapper_quoted_tag_in_preamble():

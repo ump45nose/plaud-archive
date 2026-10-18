@@ -6,6 +6,8 @@ import json
 import math
 import re
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -127,14 +129,20 @@ class Pipeline:
                         offset = block * self.config.audio_chunk_seconds
                         seconds = min(self.config.audio_chunk_seconds, duration - offset)
                         clip = folder / "audio.mp3"
+                        clip_lock = threading.Lock()
                         values, failures = {}, []
-                        for engine in ENGINES:
-                            def transcribe(engine=engine):
-                                if not clip.is_file(): cut(source, clip, offset, seconds)
+                        def transcribe(engine):
+                            def recognize():
+                                with clip_lock:
+                                    if not clip.is_file(): cut(source, clip, offset, seconds)
                                 return getattr(self.providers, engine)(clip)
-                            try:
-                                values[engine] = self.step(day, f"{audio['id']}:{block}:{engine}", folder / f"{engine}.json", transcribe)
-                            except Pending as error: failures.append(str(error))
+                            return self.step(day, f"{audio['id']}:{block}:{engine}", folder / f"{engine}.json", recognize)
+                        # Independent providers share one decoded clip; output order remains deterministic.
+                        with ThreadPoolExecutor(max_workers=3) as pool:
+                            pending = {pool.submit(transcribe, engine): engine for engine in ENGINES}
+                            for future in as_completed(pending):
+                                try: values[pending[future]] = future.result()
+                                except Pending as error: failures.append(str(error))
                         if failures:
                             day_failures.extend(failures)
                             continue

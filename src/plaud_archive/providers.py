@@ -26,6 +26,8 @@ FUSION_PROMPT = """你是中文录音转写编辑。将三源素材编辑为一�
 
 def gemini_transcript(wire):
     candidates = wire.get("candidates", [])
+    if not candidates and wire.get("promptFeedback", {}).get("blockReason"):
+        raise RuntimeError("Gemini content filter blocked transcription: " + str(wire["promptFeedback"]["blockReason"]))
     if not candidates or candidates[0].get("finishReason") != "STOP":
         reason = candidates[0].get("finishReason", "missing") if candidates else wire.get("promptFeedback", {}).get("blockReason", "no candidate")
         raise RuntimeError("Gemini transcription incomplete: " + str(reason))
