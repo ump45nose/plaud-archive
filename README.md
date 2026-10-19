@@ -1,5 +1,7 @@
 # Plaud Archive
 
+源码：[ump45nose/plaud-archive](https://github.com/ump45nose/plaud-archive)。
+
 官方 MCP 采集 → Groq / Gemini / SenseVoice 三源转录 → 文件归档 ← HTTP / MCP。
 
 每日一份可读 Markdown、当天各条可播放音频。正文不放来源引用、模型说明、逐句时间戳、候选或置信提示。SQLite 只存索引和任务结果，三源 RAW 与融合中间材料默认 30 天后清理。
