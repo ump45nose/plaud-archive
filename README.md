@@ -1,5 +1,7 @@
 # Plaud Archive
 
+本机源码入口：`/vol1/1000/Code/personal-info/plaud-archive`；聚合路径为 `personal-info/plaud-archive/`，独立仓库保持单项目根目录。
+
 源码：[ump45nose/plaud-archive](https://github.com/ump45nose/plaud-archive)。
 
 官方 MCP 采集 → Groq / Gemini / SenseVoice 三源转录 → 文件归档 ← HTTP / MCP。
