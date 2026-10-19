@@ -11,8 +11,8 @@ groq_key_file: /private/groq.key
 cpa_url: http://192.168.31.201:8317
 outbound_proxy: http://127.0.0.1:7890
 cpa_key_file: /private/cpa.key
-gemini_model: gemini-3.8-flash-high
-fusion_model: grok-4.7
+gemini_model: gemini-3-flash
+fusion_model: gemini-3.8-flash-high
 fusion_output_tokens: 131072
 sensevoice_model: /private/models/model.int8.onnx
 sensevoice_tokens: /private/models/tokens.txt

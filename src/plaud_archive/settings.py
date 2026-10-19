@@ -24,8 +24,8 @@ class Workflow:
     groq_key_file: str = ""
     cpa_url: str = "http://127.0.0.1:8317"
     cpa_key_file: str = ""
-    gemini_model: str = "gemini-3.8-flash-high"
-    fusion_model: str = "grok-4.7"
+    gemini_model: str = "gemini-3-flash"
+    fusion_model: str = "gemini-3.8-flash-high"
     fusion_output_tokens: int = 131072
     sensevoice_model: str = ""
     sensevoice_tokens: str = ""
