@@ -100,7 +100,14 @@ def create_app(archive=None, runtime=None, read_token=None, write_token=None):
     def transcript(date: str):
         value = archive.get_day(date)["markdown"]
         if value is None: raise NotFound("transcript not published")
-        return PlainTextResponse(value, media_type="text/markdown")
+        return PlainTextResponse(value, media_type="text/markdown", headers={"Content-Disposition": f'inline; filename="{date}.md"'})
+
+    @app.get("/api/v1/archives/{date}/audio/{audio_date}/{name}", dependencies=[Depends(read)])
+    def linked_audio(date: str, audio_date: str, name: str):
+        # Resolve portable audio/<date>/<filename> links relative to transcript.md.
+        if date != audio_date: raise NotFound("audio not found")
+        row = archive.get_audio_by_name(date, name)
+        return FileResponse(archive.audio_directory(date) / row["name"], filename=row["name"])
 
     @app.post("/api/v1/archives/{date}/audio", dependencies=[Depends(write)], status_code=201)
     def upload(date: str, file: UploadFile = File()):
@@ -113,8 +120,8 @@ def create_app(archive=None, runtime=None, read_token=None, write_token=None):
 
     @app.get("/api/v1/archives/{date}/audio/{identifier}", dependencies=[Depends(read)])
     def audio(date: str, identifier: str):
-        row = archive.get_audio(date, identifier)
-        return FileResponse(archive.audio_path(date, identifier), filename=row["name"])
+        path = archive.audio_path(date, identifier)
+        return FileResponse(path, filename=path.name)
 
     @app.patch("/api/v1/archives/{date}/audio/{identifier}", dependencies=[Depends(write)])
     def rename(date: str, identifier: str, record: AudioUpdate): return archive.update_audio(date, identifier, record.name)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
 import uuid
@@ -8,7 +9,39 @@ from pathlib import Path
 
 from .audio import playable
 from .pipeline import ENGINES
-from .store import atomic_write, filename
+from .store import Conflict, atomic_write, filename, now
+from .transcript import format_transcript, legacy_speaker_labels
+
+
+def migrate_layout(archive, keep_labels=()):
+    """Explicit, resumable conversion of the former per-day archive directories."""
+    with archive.connect() as db: days = [r[0] for r in db.execute("SELECT date FROM days ORDER BY date")]
+    report = {"audio_moved": 0, "markdown_moved": 0, "dates": []}
+    for day in days:
+        with archive.lock(day):
+            old = archive.root / "archives" / day
+            if not old.is_dir(): continue
+            old_audio, audio_directory = old / "audio", archive.audio_directory(day)
+            if old_audio.is_dir():
+                if audio_directory.exists(): raise Conflict("both audio layouts exist: " + day)
+                audio_directory.parent.mkdir(parents=True, exist_ok=True)
+                count = len(list(old_audio.iterdir()))
+                os.replace(old_audio, audio_directory); report["audio_moved"] += count
+            with archive.connect() as db:
+                audio = [dict(r) for r in db.execute("SELECT * FROM audio WHERE date=? ORDER BY start_at,id", (day,))]
+            for item in audio:
+                if not (audio_directory / item["name"]).is_file(): raise FileNotFoundError("archive audio missing: " + item["name"])
+            source, destination = old / "transcript.md", archive.transcript_path(day)
+            if source.is_file():
+                markdown = format_transcript(legacy_speaker_labels(source.read_text(), keep_labels), day, audio)
+                if destination.exists() and destination.read_text() != markdown:
+                    raise Conflict("both transcript layouts exist with different contents: " + day)
+                if not destination.exists(): atomic_write(destination, markdown.encode())
+                source.unlink(); report["markdown_moved"] += 1
+                with archive.connect() as db: db.execute("UPDATE days SET updated_at=? WHERE date=?", (now(), day))
+            if not any(old.iterdir()): old.rmdir()
+            report["dates"].append(day)
+    return report
 
 
 def migrate(archive, config, roots, report_path):

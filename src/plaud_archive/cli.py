@@ -24,6 +24,8 @@ def main():
     migrate = commands.add_parser("migrate")
     migrate.add_argument("--source-root", action="append", required=True)
     migrate.add_argument("--report", required=True)
+    layout = commands.add_parser("migrate-layout", help="move old daily folders to dated Markdown and audio directories")
+    layout.add_argument("--keep-label", action="append", default=[], help="preserve a non-speaker bold label in historical Markdown")
     backup = commands.add_parser("backup"); backup.add_argument("--destination", required=True)
     args = parser.parse_args()
     if args.command == "serve":
@@ -37,6 +39,9 @@ def main():
     archive = Archive(args.root or (config.root if config else "/data"))
     if args.command == "status": result = archive.status(args.date)
     elif args.command == "backup": archive.backup(args.destination); result = {"database_snapshot": args.destination}
+    elif args.command == "migrate-layout":
+        from .migration import migrate_layout
+        result = migrate_layout(archive, args.keep_label)
     else:
         if config is None: parser.error("workflow config required")
         if args.command == "cleanup": result = archive.cleanup_raw(config.raw_retention_days)

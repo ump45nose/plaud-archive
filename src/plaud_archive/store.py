@@ -11,6 +11,8 @@ import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from .transcript import change_audio_link, format_transcript
+
 
 class NotFound(Exception): pass
 class Conflict(Exception): pass
@@ -50,7 +52,7 @@ def atomic_write(path: Path, content: bytes):
 class Archive:
     def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
-        for rel in ("archives", "raw", "locks"):
+        for rel in ("archives/audio", "raw", "locks"):
             (self.root / rel).mkdir(parents=True, exist_ok=True)
         self.database = self.root / "archive.sqlite"
         with self.connect() as db:
@@ -88,14 +90,13 @@ class Archive:
             try: yield
             finally: fcntl.flock(stream, fcntl.LOCK_UN)
 
-    def directory(self, day): return self.root / "archives" / day_key(day)
-    def transcript_path(self, day): return self.directory(day) / "transcript.md"
+    def audio_directory(self, day): return self.root / "archives" / "audio" / day_key(day)
+    def transcript_path(self, day): return self.root / "archives" / (day_key(day) + ".md")
 
     def ensure_day(self, day):
         day_key(day)
         with self.connect() as db:
             db.execute("INSERT OR IGNORE INTO days VALUES(?,?,?)", (day, now(), now()))
-        self.directory(day).mkdir(parents=True, exist_ok=True)
 
     def list_days(self, start_date=None, end_date=None, offset=0, limit=50):
         if offset < 0 or not 1 <= limit <= 200: raise ValueError("invalid pagination")
@@ -123,7 +124,7 @@ class Archive:
     def create_day(self, day, markdown):
         with self.lock(day), self.connect() as db:
             if db.execute("SELECT 1 FROM days WHERE date=?", (day,)).fetchone(): raise Conflict("archive already exists")
-            atomic_write(self.transcript_path(day), markdown.encode())
+            atomic_write(self.transcript_path(day), format_transcript(markdown, day, []).encode())
             db.execute("INSERT INTO days VALUES(?,?,?)", (day, now(), now()))
             db.execute("INSERT OR REPLACE INTO jobs VALUES(?,?,?,?,?)", (day, "complete", None, None, now()))
         return self.get_day(day)
@@ -136,25 +137,30 @@ class Archive:
 
     def publish(self, day, markdown):
         # Caller holds the day lock; readers see the previous file or the complete new file.
-        atomic_write(self.transcript_path(day), markdown.encode())
         with self.connect() as db:
+            audio = [dict(r) for r in db.execute("SELECT * FROM audio WHERE date=? ORDER BY start_at,id", (day,))]
+            atomic_write(self.transcript_path(day), format_transcript(markdown, day, audio).encode())
             db.execute("UPDATE days SET updated_at=? WHERE date=?", (now(), day))
         self.job(day, "complete")
 
     def delete_day(self, day):
         with self.lock(day), self.connect() as db:
             self.get_day(day)
-            directory = self.directory(day)
             trash = self.root / (".deleted-" + uuid.uuid4().hex)
-            if directory.exists(): os.replace(directory, trash)
+            trash.mkdir()
+            paths = ((self.transcript_path(day), trash / "transcript.md"), (self.audio_directory(day), trash / "audio"))
             try:
+                for source, destination in paths:
+                    if source.exists(): os.replace(source, destination)
                 db.execute("DELETE FROM days WHERE date=?", (day,))
                 db.execute("DELETE FROM steps WHERE date=?", (day,))
                 # Persist deletion suppression with the index, even if trash cleanup fails.
                 db.execute("INSERT OR REPLACE INTO jobs VALUES(?,?,?,?,?)", (day, "complete", None, None, now()))
                 db.commit()
             except BaseException:
-                if trash.exists(): os.replace(trash, directory)
+                for source, destination in paths:
+                    if destination.exists(): os.replace(destination, source)
+                trash.rmdir()
                 raise
             if trash.exists(): shutil.rmtree(trash)
             raw = self.root / "raw" / day
@@ -171,18 +177,27 @@ class Archive:
             identifier = uuid.uuid4().hex
             if db.execute("SELECT 1 FROM audio WHERE date=? AND name=?", (day, name)).fetchone():
                 p = Path(name); name = f"{p.stem}-{identifier[:8]}{p.suffix}"
-            target = self.directory(day) / "audio" / name
+            target = self.audio_directory(day) / name
             target.parent.mkdir(parents=True, exist_ok=True)
+            md = self.transcript_path(day)
+            old_markdown, changed = md.read_text() if md.is_file() else None, False
             fd, tmp = tempfile.mkstemp(prefix=".pending-", dir=target.parent)
             try:
                 with os.fdopen(fd, "wb") as out, source.open("rb") as inp:
                     shutil.copyfileobj(inp, out, 1024 * 1024); out.flush(); os.fsync(out.fileno()); os.fchmod(out.fileno(), 0o660)
                 os.replace(tmp, target)
                 db.execute("INSERT INTO audio VALUES(?,?,?,?,?,?)", (identifier, day, source_id, name, start_at, duration_ms))
+                if old_markdown is not None:
+                    audio = [dict(r) for r in db.execute("SELECT * FROM audio WHERE date=? ORDER BY start_at,id", (day,))]
+                    markdown = format_transcript(old_markdown, day, audio)
+                    if markdown != old_markdown:
+                        atomic_write(md, markdown.encode()); changed = True
                 db.execute("UPDATE days SET updated_at=? WHERE date=?", (now(), day))
                 db.commit()
             except BaseException:
-                Path(tmp).unlink(missing_ok=True); target.unlink(missing_ok=True); raise
+                Path(tmp).unlink(missing_ok=True); target.unlink(missing_ok=True)
+                if changed: atomic_write(md, old_markdown.encode())
+                raise
         return self.get_audio(day, identifier)
 
     def get_audio(self, day, identifier):
@@ -194,7 +209,13 @@ class Archive:
 
     def audio_path(self, day, identifier):
         row = self.get_audio(day, identifier)
-        return self.directory(day) / "audio" / row["name"]
+        return self.audio_directory(day) / row["name"]
+
+    def get_audio_by_name(self, day, name):
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM audio WHERE date=? AND name=?", (day_key(day), name)).fetchone()
+        if not row: raise NotFound("audio not found")
+        return dict(row)
 
     def read_audio(self, day, identifier, offset_bytes=0, limit_bytes=262144):
         import base64
@@ -214,22 +235,39 @@ class Archive:
             if row["name"] == name: return row
             if db.execute("SELECT 1 FROM audio WHERE date=? AND name=?", (day, name)).fetchone(): raise Conflict("filename already exists")
             old = self.audio_path(day, identifier); new = old.with_name(name)
+            md = self.transcript_path(day)
+            old_markdown = md.read_text() if md.is_file() else None
+            markdown = change_audio_link(old_markdown, day, row["name"], name) if old_markdown is not None else None
+            changed = False
             os.replace(old, new)
             try:
-                db.execute("UPDATE audio SET name=? WHERE id=?", (name, identifier)); db.commit()
+                if markdown != old_markdown: atomic_write(md, markdown.encode()); changed = True
+                db.execute("UPDATE audio SET name=? WHERE id=?", (name, identifier))
+                db.execute("UPDATE days SET updated_at=? WHERE date=?", (now(), day)); db.commit()
             except BaseException:
-                os.replace(new, old); raise
+                os.replace(new, old)
+                if changed: atomic_write(md, old_markdown.encode())
+                raise
         return self.get_audio(day, identifier)
 
     def delete_audio(self, day, identifier):
         with self.lock(day), self.connect() as db:
-            p = self.audio_path(day, identifier)
+            row = self.get_audio(day, identifier)
+            p = self.audio_directory(day) / row["name"]
             trash = p.with_name(".deleted-" + uuid.uuid4().hex)
+            md = self.transcript_path(day)
+            old_markdown = md.read_text() if md.is_file() else None
+            markdown = change_audio_link(old_markdown, day, row["name"]) if old_markdown is not None else None
+            changed = False
             os.replace(p, trash)
             try:
-                db.execute("DELETE FROM audio WHERE id=?", (identifier,)); db.commit()
+                if markdown != old_markdown: atomic_write(md, markdown.encode()); changed = True
+                db.execute("DELETE FROM audio WHERE id=?", (identifier,))
+                db.execute("UPDATE days SET updated_at=? WHERE date=?", (now(), day)); db.commit()
             except BaseException:
-                os.replace(trash, p); raise
+                os.replace(trash, p)
+                if changed: atomic_write(md, old_markdown.encode())
+                raise
             trash.unlink()
         return {"deleted": identifier}
 

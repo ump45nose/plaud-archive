@@ -22,7 +22,7 @@ plaud-archive serve
 
 连续音频以 20 分钟处理切片覆盖尾段，三源完成后才融合。默认由 `gemini-3-flash` 转录音频，`gemini-3.8-flash-high`（CPA 的 3.8f）融合整理三源正文，两者可独立配置。融合素材按完整段落组包，输入默认上限 256000 tokens，使用固定 cl100k 分词器做本地计量，不推算模型总上下文或输出预算。单段超限会直接报错；可调整上限。保持整段和原始顺序，不引入检索或向量数据库。
 
-目录为 `archive.sqlite`、`archives/日期/transcript.md`、`archives/日期/audio/标题`、`raw/日期/`。RAW 可删除重建，最终正文和音频长期保存。`cleanup` 仅清理到期 RAW。`backup --destination PATH` 使用 SQLite 在线快照；业务备份还须配套保存 `archives/` 和平台 OAuth 状态。
+目录为 `archive.sqlite`、`archives/YYYY-MM-DD.md`、`archives/audio/YYYY-MM-DD/原标题`、`raw/日期/`。同一录音只保留一个可播放音频，原 MP3 直接保存、裸 Opus 无损封装，格式不强制统一。每日 MD 使用 `Speaker A:`、`Speaker B:` 标签，每条录音标题下由业务层插入 `[音频](audio/日期/文件名)` 相对链接；文件名按 URL 编码，整个 `archives/` 目录可一起迁移。音频改名、删除同步修正引用，上传只给已有对应标题的段落补链接，不自动生成转录。RAW 保留策略不变，`cleanup` 仅清理到期 RAW。`backup --destination PATH` 使用 SQLite 在线快照；业务备份还须配套保存 `archives/` 和平台 OAuth 状态。
 
 ## HTTP 与 MCP
 
@@ -32,7 +32,8 @@ MCP 授权用户通过 `OIDC_AUTHORIZED_USERNAMES` 配置，其中 `OIDC_READ_ON
 
 - `/api/v1/archives`：GET 日期筛选和分页，POST `{date, markdown}` 创建。
 - `/api/v1/archives/{date}`：GET 完整归档，PATCH `{markdown}` 替换正文，DELETE 删除正文和当天音频。
-- `/api/v1/archives/{date}/transcript.md`：GET 干净 Markdown。
+- `/api/v1/archives/{date}/transcript.md`：GET 干净 Markdown，下载文件名为 `{date}.md`。原接口路径保持。
+- `/api/v1/archives/{date}/audio/{date}/{name}`：MD 内相对链接的文件读取入口，沿用相同读权限与 Range 支持。
 - `/api/v1/archives/{date}/audio`：POST multipart 文件上传。
 - `/api/v1/archives/{date}/audio/{id}`：GET 下载，PATCH `{name}` 改名，DELETE 删除。
 - `/api/v1/status?date=YYYY-MM-DD`：处理阶段、尝试次数与错误；列表默认 50、最大 200。
@@ -50,6 +51,8 @@ plaud-archive --config /private/workflow.yaml migrate \
 ```
 
 迁移只读旧 SQLite 和文件，按来源 ID 合并库存、对冲突音频报错；裸 Opus 仅封装，不重编码。匹配原音频身份的已完成三源 RAW 可以复用。缺失下载显式进入报告，旧稿不作为新正式稿。旧备份不放在新运行目录。
+
+已使用原 `archives/日期/transcript.md` 布局的实例，在备份索引、旧 MD 并停止本应用写入后，以相同服务身份执行 `plaud-archive --root /private/data migrate-layout`。此命令显式移动音频目录、转换旧说话人标签并写入相对链接，不触发转录；可中断续跑，同一路径存在不同内容时直接报冲突。历史 MD 中属于说明而非说话人的粗体标签，可用重复的 `--keep-label LABEL` 保留。
 
 上线与进度见 [实施计划](docs/plans/2026-10-18-rebuild.md)。
 
