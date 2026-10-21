@@ -14,4 +14,14 @@ the existing runtime/venv and identity, preserving live data and OAuth.
 
 Verification: 23 source tests pass, including no Path.read_text call during metadata
 queries, empty-day filtering, missing transcript and HTTP 206 byte-range seeking.
-Deployment and real Hub LAN/public read checks pending.
+Deployment and real Hub LAN/public read checks complete. Source code release45d4e9a,
+aggregate checkpoint a25bd5d; standalone /home/yuwk/src/plaud-archive selected via one
+PYTHONPATH entry in existing private server.env. Existing unit/workdir/venv and all
+other env bytes preserved. Only plaud-archive.service was restarted on the source.
+Hub exposes authenticated public/LAN Range proxy; MP3 and Ogg Opus returned206 for
+initial and nonzero byte ranges, anonymous401, device revocation401. Metadata list
+pages14+1 days over the existing15days/33audio inventory; no new source business data.
+Native client decoding was not exercised. The aggregate main remains unmerged because
+of unrelated boot edits; all source changes are committed in this worktree and the
+independent repository main. Private rollback: /vol2/1000/Docker/hub/deployment-backups/
+v2-20261021; restore only source selection/code, never overwrite current audio/DB/OAuth.

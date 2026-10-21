@@ -1,6 +1,6 @@
 # Plaud Archive
 
-本机源码入口：`/vol1/1000/Code/personal-info/plaud-archive`；聚合路径为 `personal-info/plaud-archive/`，独立仓库保持单项目根目录。
+开发源码归聚合路径 `personal-info/plaud-archive/`；独立仓库保持单项目根目录。NAS HTTP 发布源码为 `/home/yuwk/src/plaud-archive`，原服务通过私有 `PYTHONPATH` 选择此版本，复用 `/vol1/1000/Code/personal-info/plaud-archive/.venv`。原数据、身份与采集任务保留。
 
 源码：[ump45nose/plaud-archive](https://github.com/ump45nose/plaud-archive)。
 
