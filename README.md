@@ -34,8 +34,8 @@ API 使用不同的 `PLAUD_API_READ_TOKEN` / `PLAUD_API_WRITE_TOKEN`，支持对
 
 MCP 授权用户通过 `OIDC_AUTHORIZED_USERNAMES` 配置，其中 `OIDC_READ_ONLY_USERNAMES` 的用户仅可读取；写入复用平台同一权限检查。Gemini 使用可配置模型名，示例为当前 CPA 已验证的别名；转录关闭思考并保留明确的完成/空响应/上游内容过滤错误，不将被阻断的响应当成成功。
 
-- `/api/v1/archives`：GET 日期筛选和分页，POST `{date, markdown}` 创建。
-- `/api/v1/archives/{date}`：GET 完整归档，PATCH `{markdown}` 替换正文，DELETE 删除正文和当天音频。
+- `/api/v1/archives`：GET 日期筛选和分页；可选 `audio_only=true` 只返回有音频的日期，POST `{date, markdown}` 创建。
+- `/api/v1/archives/{date}`：GET 完整归档；可选 `metadata_only=true` 仅返回索引、音频元数据与 `has_transcript`（只检查文件存在，不读取正文），PATCH `{markdown}` 替换正文，DELETE 删除正文和当天音频。
 - `/api/v1/archives/{date}/transcript.md`：GET 干净 Markdown，下载文件名为 `{date}.md`。原接口路径保持。
 - `/api/v1/archives/{date}/audio/{date}/{name}`：MD 内相对链接的文件读取入口，沿用相同读权限与 Range 支持。
 - `/api/v1/archives/{date}/audio`：POST multipart 文件上传。

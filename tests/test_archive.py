@@ -60,6 +60,32 @@ def runtime():
     return RuntimeConfig(name="plaud-archive", development_no_auth=True, host="127.0.0.1")
 
 
+def test_recording_metadata_never_reads_transcript_and_filters_empty_days(archive, tmp_path):
+    day = '2026-10-17'
+    archive.create_day(day, 'private transcript')
+    archive.create_day('2026-10-18', 'empty day')
+    audio = tmp_path / 'input.mp3'
+    audio.write_bytes(b'0123456789')
+    with archive.lock(day): asset = archive.add_audio(day, 'a.mp3', audio)
+    app = create_app(archive, runtime(), 'reader', 'writer')
+    h = {'Authorization': 'Bearer reader'}
+    with TestClient(app) as client:
+        assert client.get('/api/v1/archives/'+day+'?metadata_only=true').status_code == 401
+        with patch.object(Path, 'read_text', side_effect=AssertionError('must not read transcript')):
+            page = client.get('/api/v1/archives?audio_only=true&limit=1', headers=h).json()
+            assert page['total'] == 1 and page['items'][0]['date'] == day
+            detail = client.get('/api/v1/archives/'+day+'?metadata_only=true', headers=h)
+            assert detail.status_code == 200 and detail.json()['has_transcript'] is True
+            assert 'markdown' not in detail.json() and len(detail.json()['audio']) == 1
+        archive.transcript_path(day).unlink()
+        assert archive.get_day(day, metadata_only=True)['has_transcript'] is False
+        assert archive.get_day(day)['markdown'] is None
+        url = '/api/v1/archives/'+day+'/audio/'+asset['id']
+        r = client.get(url, headers={**h, 'Range': 'bytes=4-7'})
+        assert r.status_code == 206 and r.content == b'4567'
+        assert r.headers['content-range'] == 'bytes 4-7/10'
+
+
 def test_http_permissions_audio_and_mcp_equivalence(archive, tmp_path):
     app = create_app(archive, runtime(), "reader", "writer")
     with TestClient(app) as client:

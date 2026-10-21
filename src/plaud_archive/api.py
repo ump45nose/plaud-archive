@@ -81,14 +81,14 @@ def create_app(archive=None, runtime=None, read_token=None, write_token=None):
     def status(date: str | None = None, limit: int = 50): return archive.status(date, limit)
 
     @app.get("/api/v1/archives", dependencies=[Depends(read)])
-    def archives(start_date: str | None = None, end_date: str | None = None, offset: int = 0, limit: int = 50):
-        return archive.list_days(start_date, end_date, offset, limit)
+    def archives(start_date: str | None = None, end_date: str | None = None, offset: int = 0, limit: int = 50, audio_only: bool = False):
+        return archive.list_days(start_date, end_date, offset, limit, audio_only=audio_only)
 
     @app.post("/api/v1/archives", dependencies=[Depends(write)], status_code=201)
     def create(record: DayCreate): return archive.create_day(record.date, record.markdown)
 
     @app.get("/api/v1/archives/{date}", dependencies=[Depends(read)])
-    def get(date: str): return archive.get_day(date)
+    def get(date: str, metadata_only: bool = False): return archive.get_day(date, metadata_only=metadata_only)
 
     @app.patch("/api/v1/archives/{date}", dependencies=[Depends(write)])
     def update(date: str, record: TextUpdate): return archive.update_day(date, record.markdown)

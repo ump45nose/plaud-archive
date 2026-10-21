@@ -98,11 +98,13 @@ class Archive:
         with self.connect() as db:
             db.execute("INSERT OR IGNORE INTO days VALUES(?,?,?)", (day, now(), now()))
 
-    def list_days(self, start_date=None, end_date=None, offset=0, limit=50):
+    def list_days(self, start_date=None, end_date=None, offset=0, limit=50, audio_only=False):
         if offset < 0 or not 1 <= limit <= 200: raise ValueError("invalid pagination")
         where, args = [], []
         for value, op in ((start_date, ">="), (end_date, "<=")):
             if value: where.append(f"d.date{op}?"); args.append(day_key(value))
+        if audio_only:
+            where.append("EXISTS (SELECT 1 FROM audio a WHERE a.date=d.date)")
         if start_date and end_date and start_date > end_date: raise ValueError("start date exceeds end date")
         suffix = " WHERE " + " AND ".join(where) if where else ""
         with self.connect() as db:
@@ -112,13 +114,15 @@ class Archive:
                               [*args, limit, offset]).fetchall()
         return {"items": [dict(r) for r in rows], "total": total, "offset": offset, "limit": limit}
 
-    def get_day(self, day):
+    def get_day(self, day, metadata_only=False):
         day_key(day)
         with self.connect() as db:
             row = db.execute("SELECT * FROM days WHERE date=?", (day,)).fetchone()
             if not row: raise NotFound("archive not found")
             audio = [dict(r) for r in db.execute("SELECT * FROM audio WHERE date=? ORDER BY start_at,id", (day,))]
         p = self.transcript_path(day)
+        if metadata_only:
+            return {**dict(row), "has_transcript": p.is_file(), "audio": audio}
         return {**dict(row), "markdown": p.read_text() if p.is_file() else None, "audio": audio}
 
     def create_day(self, day, markdown):
